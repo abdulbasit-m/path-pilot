@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutterproject/modules/roadmap_steps/roadmap_step_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'roadmap_provider.dart';
@@ -98,8 +99,16 @@ class _RoadmapScreenState extends State<RoadmapScreen> {
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () {
-              
+          onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => RoadmapStepScreen(
+                    roadmapId: roadmap.id,
+                    roadmapTitle: roadmap.title,
+                  ),
+                ),
+              );
             },
             child: Padding(
               padding: const EdgeInsets.all(20.0),

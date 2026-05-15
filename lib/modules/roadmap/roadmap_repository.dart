@@ -4,11 +4,11 @@ import 'roadmap_model.dart';
 class RoadmapRepository {
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  Future<List<Roadmap>> getRoadmapsForCareer(String careerFieldId) async {
+ Future<List<Roadmap>> getRoadmapsForCareer(String careerFieldId) async {
     final response = await _supabase
         .from('roadmaps')
         .select()
-        .eq('career_field_id', careerFieldId)
+        // .eq('career_field_id', careerFieldId)  <--- ADD THESE TWO SLASHES
         .eq('is_published', true)
         .order('created_at', ascending: true);
     
