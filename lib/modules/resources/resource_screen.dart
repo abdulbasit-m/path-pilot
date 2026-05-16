@@ -1,186 +1,199 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'resource_provider.dart';
+import 'package:graphview/GraphView.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'resource_screen.dart'; // Make sure this points to your ResourceScreen file
 
-class ResourceScreen extends StatefulWidget {
-  final String stepId;
-  final String stepTitle;
+class RoadmapStepScreen extends StatefulWidget {
+  final String roadmapId;
+  final String roadmapTitle;
 
-  const ResourceScreen({
+  const RoadmapStepScreen({
     super.key,
-    required this.stepId,
-    required this.stepTitle,
+    required this.roadmapId,
+    required this.roadmapTitle,
   });
 
   @override
-  State<ResourceScreen> createState() => _ResourceScreenState();
+  State<RoadmapStepScreen> createState() => _RoadmapStepScreenState();
 }
 
-class _ResourceScreenState extends State<ResourceScreen> {
+class _RoadmapStepScreenState extends State<RoadmapStepScreen> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<dynamic> _steps = [];
+  
+  final Graph graph = Graph()..isTree = true;
+  late BuchheimWalkerConfiguration builder;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ResourceProvider>(context, listen: false)
-          .fetchResources(widget.stepId);
-    });
+    
+    // Configure the graph layout (Top to Bottom, like roadmap.sh)
+    builder = BuchheimWalkerConfiguration()
+      ..siblingSeparation = (30)
+      ..levelSeparation = (50)
+      ..subtreeSeparation = (30)
+      ..orientation = (BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM);
+      
+    _fetchAndBuildGraph();
   }
 
-  IconData _getIconForType(String type) {
-    switch (type.toLowerCase()) {
-      case 'video':
-        return Icons.play_circle_fill_rounded;
-      case 'course':
-        return Icons.school_rounded;
-      case 'article':
-      default:
-        return Icons.article_rounded;
-    }
-  }
+  Future<void> _fetchAndBuildGraph() async {
+    try {
+      // 1. Fetch steps strictly for this roadmap, ordered by step_order
+      final response = await Supabase.instance.client
+          .from('roadmap_steps')
+          .select('*')
+          .eq('roadmap_id', widget.roadmapId)
+          .order('step_order', ascending: true);
 
-  Color _getColorForType(String type) {
-    switch (type.toLowerCase()) {
-      case 'video':
-        return const Color(0xFFDC2626);
-      case 'course':
-        return const Color(0xFF0D9488);
-      case 'article':
-      default:
-        return const Color(0xFF2563EB);
-    }
-  }
+      _steps = response as List;
 
-  Future<void> _launchUrl(String urlString) async {
-    final Uri url = Uri.parse(urlString);
-    if (!await launchUrl(url)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open link')),
-        );
+      // 2. Build the graph nodes and connecting lines
+      if (_steps.isNotEmpty) {
+        List<Node> nodes = [];
+        
+        // Create a node for every step
+        for (var step in _steps) {
+          nodes.add(Node.Id(step));
+        }
+
+        // Draw connecting edges from Step 1 -> Step 2 -> Step 3
+        for (int i = 0; i < nodes.length - 1; i++) {
+          graph.addEdge(nodes[i], nodes[i + 1]);
+        }
       }
+
+    } catch (e) {
+      _errorMessage = e.toString();
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<ResourceProvider>(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
-          widget.stepTitle,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+          widget.roadmapTitle,
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: Colors.white,
         elevation: 0,
       ),
-      body: provider.isLoading
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
-          : provider.errorMessage != null
-              ? Center(child: Text('Error: ${provider.errorMessage}'))
-              : _buildList(provider),
+          : _errorMessage != null
+              ? Center(child: Text('Error: $_errorMessage'))
+              : _steps.isEmpty
+                  ? const Center(child: Text('No steps available yet.'))
+                  : InteractiveViewer(
+                      constrained: false,
+                      boundaryMargin: const EdgeInsets.all(100),
+                      minScale: 0.5,
+                      maxScale: 2.0,
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: GraphView(
+                          graph: graph,
+                          algorithm: BuchheimWalkerAlgorithm(builder, TreeEdgeRenderer(builder)),
+                          paint: Paint()
+                            ..color = const Color(0xFF94A3B8)
+                            ..strokeWidth = 2
+                            ..style = PaintingStyle.stroke,
+                          builder: (Node node) {
+                            var stepData = node.key!.value as Map<String, dynamic>;
+                            return _buildNodeWidget(stepData);
+                          },
+                        ),
+                      ),
+                    ),
     );
   }
 
-  Widget _buildList(ResourceProvider provider) {
-    if (provider.resources.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.folder_open_rounded, size: 64, color: Color(0xFFCBD5E1)),
-            const SizedBox(height: 16),
-            Text(
-              'No resources added yet.',
-              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(24),
-      itemCount: provider.resources.length,
-      itemBuilder: (context, index) {
-        final resource = provider.resources[index];
-
-        return Card(
-          elevation: 0,
-          margin: const EdgeInsets.only(bottom: 16),
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.grey.shade200),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => _launchUrl(resource.url),
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _getColorForType(resource.resourceType).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      _getIconForType(resource.resourceType),
-                      color: _getColorForType(resource.resourceType),
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          resource.title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                resource.resourceType.toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF64748B),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Icon(
-                    Icons.open_in_new_rounded,
-                    color: Color(0xFFCBD5E1),
-                  ),
-                ],
-              ),
+  // This is the physical UI of the boxes on the graph
+  Widget _buildNodeWidget(Map<String, dynamic> stepData) {
+    return InkWell(
+      onTap: () {
+        // Navigates to your existing ResourceScreen when a box is tapped
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ResourceScreen(
+              stepId: stepData['id'].toString(),
+              stepTitle: stepData['title'].toString(),
             ),
           ),
         );
       },
+      child: Container(
+        width: 250,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.check_circle_outline,
+                    color: Color(0xFF64748B),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    stepData['title'].toString(),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (stepData['description'] != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                stepData['description'].toString(),
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF64748B),
+                  height: 1.4,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ]
+          ],
+        ),
+      ),
     );
   }
 }

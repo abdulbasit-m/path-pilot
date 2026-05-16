@@ -2,11 +2,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProgressRepository {
   final SupabaseClient _supabase = Supabase.instance.client;
+  
+  // A temporary mock UUID to bypass auth checks during development
+  final String _mockUserId = '00000000-0000-0000-0000-000000000000';
 
-  // Fetch all completed step IDs for the logged-in user
+  String _getEffectiveUserId() {
+    return _supabase.auth.currentUser?.id ?? _mockUserId;
+  }
+
+  // Fetch all completed step IDs
   Future<List<String>> getCompletedSteps() async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return [];
+    final userId = _getEffectiveUserId();
 
     final response = await _supabase
         .from('user_progress')
@@ -20,8 +26,7 @@ class ProgressRepository {
 
   // Mark a step as complete
   Future<void> markStepComplete(String stepId) async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) throw Exception('User not logged in');
+    final userId = _getEffectiveUserId();
 
     await _supabase.from('user_progress').insert({
       'user_id': userId,
@@ -31,8 +36,7 @@ class ProgressRepository {
 
   // Mark a step as incomplete
   Future<void> markStepIncomplete(String stepId) async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) throw Exception('User not logged in');
+    final userId = _getEffectiveUserId();
 
     await _supabase
         .from('user_progress')
