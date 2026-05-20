@@ -1,32 +1,50 @@
-name: Path Pilot Web Deploy
+# =========================================================================
+# PIPELINE MISSION: Build Flutter Web into a Docker Container & Push to ECR
+# =========================================================================
+name: Path Pilot Cloud Container Deploy
 
 on:
   push:
-    branches: [ main ]
-
+    branches: [ main ]  # Trigger only when code changes are pushed to main
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+  build-and-push-containers:
+    # 1. THE TARGET RUNNER: Points directly to your custom AWS EC2 Agent
+    runs-on: self-hosted
 
-   
     steps:
-      - name: Checkout Repository
+      # Step A: Download your fresh codebase onto the AWS EC2 instance
+      - name: Checkout Codebase
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
+      # Step B: Securely look up your AWS Account ID dynamically
+      - name: Fetch AWS Metadata Configuration
+        id: aws-metadata
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+          AWS_REGION="us-east-1"
+          echo "account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "region=$AWS_REGION" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies
-        run: flutter pub get
+      # Step C: Log the local Docker client securely into your private AWS ECR Vault
+      - name: Authenticate Docker to AWS ECR
+        run: |
+          aws ecr get-login-password --region ${{ steps.aws-metadata.outputs.region }} | docker login --username AWS --password-stdin ${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com
 
-      - name: Build Web Application
-        run: flutter build web --release --base-href "/path-pilot/"
+      # Step D: Execute the multi-stage Dockerfile compilation recipe
+      - name: Compile and Build Docker Image
+        run: |
+          REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
+          IMAGE_TAG="latest"
+          REPOSITORY_NAME="path-pilot"
+          
+          docker build -t $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG .
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }} 
-          publish_dir: ./build/web
+      # Step E: Ship the finished immutable container up to AWS Elastic Container Registry
+      - name: Push Container Image to AWS ECR
+        run: |
+          REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
+          IMAGE_TAG="latest"
+          REPOSITORY_NAME="path-pilot"
+          
+          docker push $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
