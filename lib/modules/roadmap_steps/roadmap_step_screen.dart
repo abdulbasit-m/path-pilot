@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutterproject/modules/resources/resource_screen.dart';
 import 'package:provider/provider.dart';
-import 'package:go_router/go_router.dart';
 import 'roadmap_step_provider.dart';
 import '../progress/progress_provider.dart';
 
