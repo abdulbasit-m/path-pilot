@@ -1,5 +1,5 @@
 # =========================================================================
-# PIPELINE MISSION: Build Flutter Web into a Docker Container & Push to ECR
+# PIPELINE MISSION: Build Flutter Web, Push to ECR, and Live Host on EC2
 # =========================================================================
 name: Path Pilot Cloud Container Deploy
 
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-and-push-containers:
-    # 1. THE TARGET RUNNER: Points directly to your custom AWS EC2 Agent
+    # THE TARGET RUNNER: Points directly to your custom AWS EC2 Agent
     runs-on: self-hosted
 
     steps:
@@ -48,3 +48,35 @@ jobs:
           REPOSITORY_NAME="path-pilot"
           
           docker push $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
+
+      # =========================================================================
+      # TASK 3: CONTINUOUS DEPLOYMENT (HOSTING LIVE ON EC2)
+      # =========================================================================
+      
+      # Step F: Gracefully stop and clean up any old version running on Port 80
+      - name: Stop Existing Path Pilot Container
+        run: |
+          docker stop path-pilot-app || true
+          docker rm path-pilot-app || true
+
+      # Step G: Pull the absolute freshest image block from your private ECR registry
+      - name: Pull Fresh Image from ECR
+        run: |
+          REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
+          IMAGE_TAG="latest"
+          REPOSITORY_NAME="path-pilot"
+          
+          docker pull $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
+
+      # Step H: Fire up the container on Port 80 to open it to the public web!
+      - name: Launch Live Production Container
+        run: |
+          REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
+          IMAGE_TAG="latest"
+          REPOSITORY_NAME="path-pilot"
+          
+          docker run -d \
+            --name path-pilot-app \
+            -p 80:80 \
+            --restart always \
+            $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
