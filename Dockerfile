@@ -34,8 +34,8 @@ RUN flutter pub get
 # Copy the entire project codebase into the container
 COPY . .
 
-# Compile the final production web assets
-RUN flutter build web --release --base-href "/path-pilot/"
+# Compile the final production web assets directly for the root path
+RUN flutter build web --release --base-href "/"
 
 # ==========================================
 # STAGE 2: Serve the Compiled Assets using Nginx
