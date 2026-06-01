@@ -21,11 +21,10 @@ import 'modules/admin/admin_careers_screen.dart';
 import 'modules/admin/admin_roadmaps_screen.dart';
 import 'modules/admin/admin_steps_screen.dart';
 import 'modules/admin/admin_resources_screen.dart';
-import 'modules/progress/progress_provider.dart'; // NEW IMPORT
+import 'modules/progress/progress_provider.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
@@ -47,7 +46,7 @@ class PathPilotApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RoadmapProvider()),
         ChangeNotifierProvider(create: (_) => RoadmapStepProvider()),
         ChangeNotifierProvider(create: (_) => ResourceProvider()),
-        ChangeNotifierProvider(create: (_) => ProgressProvider()), // NEW PROVIDER
+        ChangeNotifierProvider(create: (_) => ProgressProvider()), 
       ],
       child: Builder(
         builder: (context) {
@@ -59,7 +58,6 @@ class PathPilotApp extends StatelessWidget {
             redirect: (context, state) {
               final isLoggedIn = authProvider.user != null;
               final isGoingToAuth = state.matchedLocation == '/login';
-              
               if (!isLoggedIn && !isGoingToAuth) return '/login';
               if (isLoggedIn && isGoingToAuth) return '/home';
               return null;

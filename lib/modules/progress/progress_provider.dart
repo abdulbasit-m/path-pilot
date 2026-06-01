@@ -1,21 +1,34 @@
 import 'package:flutter/material.dart';
-import 'progress_repository.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ProgressProvider extends ChangeNotifier {
-  final ProgressRepository _repository = ProgressRepository();
-  Set<String> _completedStepIds = {};
+class ProgressProvider with ChangeNotifier {
+  final SupabaseClient _supabase = Supabase.instance.client;
+  
+  // Set of completed step IDs for the logged-in user
+  final Set<String> _completedStepIds = {};
   bool _isLoading = false;
 
   Set<String> get completedStepIds => _completedStepIds;
   bool get isLoading => _isLoading;
 
+  // Fetch all completed steps for the current user
   Future<void> fetchProgress() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
     _isLoading = true;
     notifyListeners();
 
     try {
-      final ids = await _repository.getCompletedSteps();
-      _completedStepIds = ids.toSet();
+      final response = await _supabase
+          .from('user_progress')
+          .select('step_id')
+          .eq('user_id', user.id);
+
+      _completedStepIds.clear();
+      for (var row in response as List) {
+        _completedStepIds.add(row['step_id'].toString());
+      }
     } catch (e) {
       debugPrint('Error fetching progress: $e');
     } finally {
@@ -24,36 +37,43 @@ class ProgressProvider extends ChangeNotifier {
     }
   }
 
-  bool isStepCompleted(String stepId) {
-    return _completedStepIds.contains(stepId);
-  }
-
+  // Toggle step completion status status
   Future<void> toggleStepCompletion(String stepId) async {
-    final currentlyCompleted = isStepCompleted(stepId);
-    
-    // Optimistic UI update for instant feedback
-    if (currentlyCompleted) {
-      _completedStepIds.remove(stepId);
-    } else {
-      _completedStepIds.add(stepId);
-    }
-    notifyListeners();
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    final isCompleted = _completedStepIds.contains(stepId);
 
     try {
-      if (currentlyCompleted) {
-        await _repository.markStepIncomplete(stepId);
+      if (isCompleted) {
+        // Uncheck milestone
+        _completedStepIds.remove(stepId);
+        notifyListeners();
+        
+        await _supabase
+            .from('user_progress')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('step_id', stepId);
       } else {
-        await _repository.markStepComplete(stepId);
+        // Check milestone
+        _completedStepIds.add(stepId);
+        notifyListeners();
+
+        await _supabase.from('user_progress').insert({
+          'user_id': user.id,
+          'step_id': stepId,
+        });
       }
     } catch (e) {
-      // Revert if database fails
-      if (currentlyCompleted) {
+      // Rollback state if network request fails
+      if (isCompleted) {
         _completedStepIds.add(stepId);
       } else {
         _completedStepIds.remove(stepId);
       }
-      notifyListeners();
       debugPrint('Error toggling progress: $e');
+      notifyListeners();
     }
   }
 }

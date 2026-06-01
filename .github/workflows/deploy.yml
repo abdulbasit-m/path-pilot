@@ -1,6 +1,4 @@
-# =========================================================================
-# PIPELINE MISSION: Build Flutter Web, Push to ECR, and Live Host on EC2
-# =========================================================================
+# PIPELINE: Build Flutter Web, Push to ECR, and Live Host on EC2
 name: Path Pilot Cloud Container Deploy
 
 on:
@@ -48,10 +46,7 @@ jobs:
           REPOSITORY_NAME="path-pilot"
           
           docker push $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
-
-      # =========================================================================
       # TASK 3: CONTINUOUS DEPLOYMENT (HOSTING LIVE ON EC2)
-      # =========================================================================
       
       # Step F: Gracefully stop and clean up any old version running on Port 80
       - name: Stop Existing Path Pilot Container

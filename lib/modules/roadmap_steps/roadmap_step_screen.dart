@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutterproject/modules/resources/resource_screen.dart';
+import 'package:graphview/GraphView.dart';
 import 'package:provider/provider.dart';
-import 'roadmap_step_provider.dart';
-import '../progress/progress_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutterproject/modules/resources/resource_screen.dart';
+import 'package:flutterproject/modules/progress/progress_provider.dart';
 
 class RoadmapStepScreen extends StatefulWidget {
   final String roadmapId;
@@ -19,168 +20,206 @@ class RoadmapStepScreen extends StatefulWidget {
 }
 
 class _RoadmapStepScreenState extends State<RoadmapStepScreen> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<dynamic> _steps = [];
+  
+  final Graph graph = Graph()..isTree = true;
+  late BuchheimWalkerConfiguration builder;
+
   @override
   void initState() {
     super.initState();
+    
+    builder = BuchheimWalkerConfiguration()
+      ..siblingSeparation = (40)
+      ..levelSeparation = (60)
+      ..subtreeSeparation = (40)
+      ..orientation = (BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM);
+      
+    // Fetch roadmap structure and user completion status together
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<RoadmapStepProvider>(context, listen: false)
-          .fetchSteps(widget.roadmapId);
-      Provider.of<ProgressProvider>(context, listen: false)
-          .fetchProgress();
+      Provider.of<ProgressProvider>(context, listen: false).fetchProgress();
+      _fetchAndBuildGraph();
     });
+  }
+
+  Future<void> _fetchAndBuildGraph() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('roadmap_steps')
+          .select('*')
+          .eq('roadmap_id', widget.roadmapId)
+          .order('step_order', ascending: true);
+
+      _steps = response as List;
+
+      if (_steps.isNotEmpty) {
+        Map<String, Node> nodeMap = {};
+        
+        for (var step in _steps) {
+          String currentId = step['id'].toString();
+          nodeMap[currentId] = Node.Id(step);
+        }
+
+        for (var step in _steps) {
+          String currentId = step['id'].toString();
+          var parentIdValue = step['parent_step_id'];
+
+          Node currentNode = nodeMap[currentId]!;
+
+          if (parentIdValue != null) {
+            String parentId = parentIdValue.toString();
+            Node? parentNode = nodeMap[parentId];
+
+            if (parentNode != null) {
+              graph.addEdge(parentNode, currentNode);
+            }
+          } else {
+            graph.addNode(currentNode);
+          }
+        }
+      }
+
+    } catch (e) {
+      _errorMessage = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final stepProvider = Provider.of<RoadmapStepProvider>(context);
-    final progressProvider = Provider.of<ProgressProvider>(context);
-
-    // Calculate overall progress
-    final totalSteps = stepProvider.steps.length;
-    final completedSteps = stepProvider.steps.where((s) => progressProvider.isStepCompleted(s.id)).length;
-    final progressPercentage = totalSteps == 0 ? 0.0 : completedSteps / totalSteps;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
           widget.roadmapTitle,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: Colors.white,
         elevation: 0,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(6.0),
-          child: LinearProgressIndicator(
-            value: progressPercentage,
-            backgroundColor: const Color(0xFF1E293B),
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
-            minHeight: 6.0,
-          ),
-        ),
       ),
-      body: stepProvider.isLoading || progressProvider.isLoading
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
-          : stepProvider.errorMessage != null
-              ? Center(child: Text('Error: ${stepProvider.errorMessage}'))
-              : _buildList(stepProvider, progressProvider),
+          : _errorMessage != null
+              ? Center(child: Text('Error: $_errorMessage'))
+              : _steps.isEmpty
+                  ? const Center(child: Text('No steps available yet.'))
+                  : InteractiveViewer(
+                      constrained: false,
+                      boundaryMargin: const EdgeInsets.all(500),
+                      minScale: 0.2,
+                      maxScale: 2.0,
+                      child: Padding(
+                        padding: const EdgeInsets.all(48.0),
+                        child: GraphView(
+                          graph: graph,
+                          algorithm: BuchheimWalkerAlgorithm(builder, TreeEdgeRenderer(builder)),
+                          paint: Paint()
+                            ..color = const Color(0xFF94A3B8)
+                            ..strokeWidth = 2
+                            ..style = PaintingStyle.stroke,
+                          builder: (Node node) {
+                            var stepData = node.key!.value as Map<String, dynamic>;
+                            return _buildNodeWidget(stepData);
+                          },
+                        ),
+                      ),
+                    ),
     );
   }
 
-  Widget _buildList(RoadmapStepProvider stepProvider, ProgressProvider progressProvider) {
-    if (stepProvider.steps.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.format_list_numbered_rounded, size: 64, color: Color(0xFFCBD5E1)),
-            const SizedBox(height: 16),
-            Text(
-              'No steps available yet.',
-              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-            ),
-          ],
-        ),
-      );
-    }
+  Widget _buildNodeWidget(Map<String, dynamic> stepData) {
+    final String currentStepId = stepData['id'].toString();
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(24),
-      itemCount: stepProvider.steps.length,
-      itemBuilder: (context, index) {
-        final step = stepProvider.steps[index];
-        final isCompleted = progressProvider.isStepCompleted(step.id);
+    // Consume the live completion states from the progress provider
+    return Consumer<ProgressProvider>(
+      builder: (context, progress, child) {
+        final bool isDone = progress.completedStepIds.contains(currentStepId);
 
-        return Card(
-          elevation: 0,
-          margin: const EdgeInsets.only(bottom: 16),
-          color: isCompleted ? const Color(0xFFF0FDFA) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: isCompleted ? const Color(0xFF5EEAD4) : Colors.grey.shade200),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ResourceScreen(
-                    // Note: Depending on what the next screen asks for, 
-                    // these might be named slightly differently (e.g., id: step.id)
-                    stepId: step.id,
-                    stepTitle: step.title,
-                  ),
+        return InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ResourceScreen(
+                  stepId: currentStepId,
+                  stepTitle: stepData['title'].toString(),
                 ),
-              );
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => progressProvider.toggleStepCompletion(step.id),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: isCompleted ? const Color(0xFF0D9488) : Colors.white,
-                        border: Border.all(
-                          color: isCompleted ? const Color(0xFF0D9488) : const Color(0xFFCBD5E1),
-                          width: 2,
-                        ),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: isCompleted
-                            ? const Icon(Icons.check_rounded, color: Colors.white, size: 24)
-                            : Text(
-                                '${step.stepOrder}',
-                                style: const TextStyle(
-                                  color: Color(0xFF64748B),
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          step.title,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: isCompleted ? const Color(0xFF0F172A).withOpacity(0.5) : const Color(0xFF0F172A),
-                            decoration: isCompleted ? TextDecoration.lineThrough : null,
-                          ),
-                        ),
-                        if (step.description != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            step.description!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFF64748B),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Color(0xFFCBD5E1),
-                  ),
-                ],
               ),
+            );
+          },
+          child: Container(
+            width: 240,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              // If node is checked off, color it emerald green, else keep it crisp white
+              color: isDone ? const Color(0xFFE6F4EA) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDone ? const Color(0xFF137333) : const Color(0xFFE2E8F0), 
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    // Clickable milestone checkbox icon
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: Icon(
+                        isDone ? Icons.check_box : Icons.check_box_outline_blank,
+                        color: isDone ? const Color(0xFF137333) : const Color(0xFF64748B),
+                        size: 22,
+                      ),
+                      onPressed: () {
+                        progress.toggleStepCompletion(currentStepId);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        stepData['title'].toString(),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: isDone ? const Color(0xFF137333) : const Color(0xFF0F172A),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (stepData['description'] != null && stepData['description'].toString().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    stepData['description'].toString(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDone ? const Color(0xFF137333).withOpacity(0.8) : const Color(0xFF64748B),
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ]
+              ],
             ),
           ),
         );
