@@ -1,23 +1,17 @@
-# =========================================================================
-# PIPELINE MISSION: Build Flutter Web, Push to ECR, and Live Host on EC2
-# =========================================================================
 name: Path Pilot Cloud Container Deploy
 
 on:
   push:
-    branches: [ main ]  # Trigger only when code changes are pushed to main
+    branches: [ main ]
 
 jobs:
   build-and-push-containers:
-    # THE TARGET RUNNER: Points directly to your custom AWS EC2 Agent
     runs-on: self-hosted
 
     steps:
-      # Step A: Download your fresh codebase onto the AWS EC2 instance
       - name: Checkout Codebase
         uses: actions/checkout@v4
 
-      # Step B: Securely look up your AWS Account ID dynamically
       - name: Fetch AWS Metadata Configuration
         id: aws-metadata
         run: |
@@ -26,12 +20,10 @@ jobs:
           echo "account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
           echo "region=$AWS_REGION" >> $GITHUB_OUTPUT
 
-      # Step C: Log the local Docker client securely into your private AWS ECR Vault
       - name: Authenticate Docker to AWS ECR
         run: |
           aws ecr get-login-password --region ${{ steps.aws-metadata.outputs.region }} | docker login --username AWS --password-stdin ${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com
 
-      # Step D: Execute the multi-stage Dockerfile compilation recipe
       - name: Compile and Build Docker Image
         run: |
           REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
@@ -40,7 +32,6 @@ jobs:
           
           docker build -t $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG .
 
-      # Step E: Ship the finished immutable container up to AWS Elastic Container Registry
       - name: Push Container Image to AWS ECR
         run: |
           REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
@@ -48,18 +39,12 @@ jobs:
           REPOSITORY_NAME="path-pilot"
           
           docker push $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
-
-      # =========================================================================
-      # TASK 3: CONTINUOUS DEPLOYMENT (HOSTING LIVE ON EC2)
-      # =========================================================================
       
-      # Step F: Gracefully stop and clean up any old version running on Port 80
       - name: Stop Existing Path Pilot Container
         run: |
           docker stop path-pilot-app || true
           docker rm path-pilot-app || true
 
-      # Step G: Pull the absolute freshest image block from your private ECR registry
       - name: Pull Fresh Image from ECR
         run: |
           REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
@@ -68,7 +53,6 @@ jobs:
           
           docker pull $REGISTRY_URL/$REPOSITORY_NAME:$IMAGE_TAG
 
-      # Step H: Fire up the container on Port 80 to open it to the public web!
       - name: Launch Live Production Container
         run: |
           REGISTRY_URL="${{ steps.aws-metadata.outputs.account_id }}.dkr.ecr.${{ steps.aws-metadata.outputs.region }}.amazonaws.com"
