@@ -1,0 +1,37 @@
+name: Compile Standalone Submission APK
+
+on:
+  push:
+    branches:
+      - feature/work-from-home-sync
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository Source
+        uses: actions/checkout@v4
+
+      - name: Setup Java JRE environment
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter Toolchain
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Compile Release APK Bundle
+        run: flutter build apk --release --no-pub
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: path-pilot-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
